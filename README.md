@@ -1,4 +1,4 @@
-# 🌊 Multi-Droplet Wave Simulator
+#  Multi-Droplet Wave Simulator
 
 <div align="center">
 
