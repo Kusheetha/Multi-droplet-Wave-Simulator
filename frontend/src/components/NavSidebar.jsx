@@ -5,13 +5,8 @@ import {
 } from 'lucide-react'
 
 const navItems = [
-  { icon: LayoutDashboard, label: 'Dashboard' },
+  
   { icon: Activity,        label: 'Simulation', active: true },
-  { icon: Layers,          label: 'Presets' },
-  { icon: BarChart2,       label: 'Analytics' },
-  { icon: Download,        label: 'Export' },
-  { icon: Settings,        label: 'Settings' },
-  { icon: HelpCircle,      label: 'Help' },
 ]
 
 const s = {

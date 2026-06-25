@@ -4,17 +4,17 @@ const s = {
   bar: {
     padding: '10px 16px', background: 'var(--bg-panel)',
     borderTop: '1px solid var(--border-dim)',
-    display: 'flex', alignItems: 'center', gap: 0,
+    display: 'flex', alignItems: 'center', gap: 5,
     flexShrink: 0,
   },
   sectionTitle: {
     fontSize: 9, color: 'var(--text-muted)', letterSpacing: '0.12em',
-    textTransform: 'uppercase', marginRight: 16,
+    textTransform: 'uppercase', marginRight: 10,
   },
   metric: {
     flex: 1, padding: '0 12px',
     borderLeft: '1px solid var(--border-dim)',
-    display: 'flex', flexDirection: 'column', gap: 3,
+    display: 'flex', flexDirection: 'column', gap: 4,
   },
   mLabel: { fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' },
   mValue: {

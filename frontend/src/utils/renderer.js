@@ -1,140 +1,172 @@
-/**
- * Renders a flat Float32Array height field onto a canvas.
- */
-
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x))
 
-// ------------------ 2D VIEW ------------------
-export function drawTopView(ctx, frame, W, H) {
-  const { rows, cols, data } = frame
-
-  // 🔥 DARK BACKGROUND (template style)
-  ctx.fillStyle = '#020617'
-  ctx.fillRect(0, 0, W, H)
-
-  // 🔥 find max amplitude for normalization
-  let maxAbs = 0
-  for (let i = 0; i < data.length; i++) {
-    maxAbs = Math.max(maxAbs, Math.abs(data[i]))
-  }
-  maxAbs = maxAbs || 1
-
-  // create image buffer
-  const img = ctx.createImageData(cols, rows)
-  const pixels = img.data
-
-  for (let i = 0; i < data.length; i++) {
-    let v = data[i]
-
-    // normalize to 0–1
-    let norm = (v + maxAbs) / (2 * maxAbs)
-    norm = Math.pow(norm, 0.6)   // <--- makes peaks brighter
-    norm = clamp(norm, 0, 1)
-
-    // 🔥 SMOOTH DARK-BLUE → CYAN → YELLOW palette
-    const r = Math.floor(20 + 200 * Math.pow(norm, 1.5))
-    const g = Math.floor(40 + 180 * Math.pow(norm, 2.0))
-    const b = Math.floor(120 + 135 * (1 - norm))
-
-    const idx = i * 4
-    pixels[idx] = r
-    pixels[idx + 1] = g
-    pixels[idx + 2] = b
-    pixels[idx + 3] = 255
-  }
-
-  // draw via temp canvas (smooth scaling)
-  const tmp = document.createElement('canvas')
-  tmp.width = cols
-  tmp.height = rows
-  const tctx = tmp.getContext('2d')
-  tctx.putImageData(img, 0, 0)
-
-  ctx.imageSmoothingEnabled = true
-  ctx.drawImage(tmp, 0, 0, W, H)
-
-  // 🔥 GLOW EFFECT (important)
-  ctx.globalCompositeOperation = 'lighter'
-  ctx.globalAlpha = 0.15
-  ctx.drawImage(tmp, 0, 0, W, H)
-  ctx.globalAlpha = 1
-  ctx.globalCompositeOperation = 'source-over'
+function syncCanvas(canvas) {
+  const rect = canvas.getBoundingClientRect()
+  const W = Math.round(rect.width) || canvas.offsetWidth || 400
+  const H = Math.round(rect.height) || canvas.offsetHeight || 300
+  if (canvas.width !== W) canvas.width = W
+  if (canvas.height !== H) canvas.height = H
+  return { W, H }
 }
 
-// ------------------ 3D VIEW ------------------
-export function drawIsoView(canvas, frame, amplitude = 1.0) {
+function frameStats(data) {
+  let absMax = 1e-6
+  for (let i = 0; i < data.length; i++) {
+    const a = Math.abs(data[i])
+    if (a > absMax) absMax = a
+  }
+  return absMax
+}
+
+// 🎨 shared color (same everywhere)
+function getColor(t) {
+  t = clamp(t, 0, 1)
+
+  const r = Math.floor(30 + 180 * Math.pow(t, 1.8))
+  const g = Math.floor(80 + 140 * Math.pow(t, 1.4))
+  const b = Math.floor(140 + 100 * (1 - t))
+
+  return [r, g, b]
+}
+
+// ─── 2D VIEW ─────────────────────────────────────────────────────────
+
+export function drawTopView(canvas, frame) {
   if (!frame || !canvas) return
 
   const { rows, cols, data } = frame
-  const ctx = canvas.getContext('2d')
-  const W = canvas.width
-  const H = canvas.height
+  const { W, H } = syncCanvas(canvas)
+  if (W === 0 || H === 0) return
 
-  // background
+  const ctx = canvas.getContext('2d')
+  const absMax = frameStats(data)
+
+  const img = ctx.createImageData(cols, rows)
+  const px = img.data
+
+  for (let i = 0; i < data.length; i++) {
+    const v = data[i]
+    const p = i * 4
+
+    let t = (v + absMax) / (2 * absMax)
+    const [r, g, b] = getColor(t)
+
+    px[p] = r
+    px[p + 1] = g
+    px[p + 2] = b
+    px[p + 3] = 255
+  }
+
+  const tmp = document.createElement('canvas')
+  tmp.width = cols
+  tmp.height = rows
+  tmp.getContext('2d').putImageData(img, 0, 0)
+
   ctx.fillStyle = '#020617'
   ctx.fillRect(0, 0, W, H)
 
+  ctx.imageSmoothingEnabled = true
+  ctx.imageSmoothingQuality = 'high'
+  ctx.drawImage(tmp, 0, 0, W, H)
+}
+
+// ─── 3D VIEW (FIXED + SMOOTH) ────────────────────────────────────────
+
+export function drawIsoView(canvas, frame) {
+  if (!frame || !canvas) return
+
+  const { rows, cols, data } = frame
+  const { W, H } = syncCanvas(canvas)
+  if (W === 0 || H === 0) return
+
+  const ctx = canvas.getContext('2d')
+  const absMax = frameStats(data)
+
+  ctx.fillStyle = '#020617'
+  ctx.fillRect(0, 0, W, H)
+
+  // ✅ FIXED SCALE (no cropping)
+  const scale = Math.min(W, H) / (rows + cols) * 1.4  // zoom OUT slightly
+
+  // ✅ FIXED HEIGHT (no puffiness)
+  const zScale = H * 0.08 / absMax
+
   const cx = W / 2
-  const cy = H * 0.5
+  const cy = H * 0.26
 
-  const scaleX = W / cols * 0.8
-  const scaleY = H / rows * 0.4
-  const heightScale = H * 0.25 / amplitude
+  const proj = (x, y, z) => ({
+    x: cx + (x - y) * scale,
+    y: cy + (x + y) * scale * 0.5 - z * zScale
+  })
 
+  // 🔥 smoothness
+  const RES = 4
+
+  // bilinear interpolation
+  const sample = (fx, fy) => {
+    const x0 = Math.floor(fx)
+    const y0 = Math.floor(fy)
+
+    const x1 = Math.min(x0 + 1, cols - 1)
+    const y1 = Math.min(y0 + 1, rows - 1)
+
+    const dx = fx - x0
+    const dy = fy - y0
+
+    const v00 = data[y0 * cols + x0]
+    const v10 = data[y0 * cols + x1]
+    const v01 = data[y1 * cols + x0]
+    const v11 = data[y1 * cols + x1]
+
+    return (
+      v00 * (1 - dx) * (1 - dy) +
+      v10 * dx * (1 - dy) +
+      v01 * (1 - dx) * dy +
+      v11 * dx * dy
+    )
+  }
+
+  // painter's algorithm
   for (let i = 0; i < rows - 1; i++) {
-    for (let j = 0; j < cols - 1; j++) {
+    for (let j = cols - 2; j >= 0; j--) {
 
-      // 4 corners (THIS IS THE KEY)
-      const v1 = data[i * cols + j]
-      const v2 = data[i * cols + (j + 1)]
-      const v3 = data[(i + 1) * cols + (j + 1)]
-      const v4 = data[(i + 1) * cols + j]
+      for (let si = 0; si < RES; si++) {
+        for (let sj = 0; sj < RES; sj++) {
 
-      // average height (smooth surface)
-      const v = (v1 + v2 + v3 + v4) / 4
+          const fx = j + sj / RES
+          const fy = i + si / RES
 
-      // normalize (same as 2D)
-      let norm = (v + amplitude) / (2 * amplitude)
-      norm = Math.pow(norm, 0.6)   // <--- makes peaks brighter
-      norm = clamp(norm, 0, 1)
+          const fx1 = j + (sj + 1) / RES
+          const fy1 = i + (si + 1) / RES
 
-      // same color as 2D
-      const r = Math.floor(20 + 200 * Math.pow(norm, 1.5))
-      const g = Math.floor(40 + 180 * Math.pow(norm, 2.0))
-      const b = Math.floor(120 + 135 * (1 - norm))
-      const shade = 0.7 + 0.3 * norm
-      const rr = Math.floor(r * shade)
-      const gg = Math.floor(g * shade)
-      const bb = Math.floor(b * shade)
+          const v00 = sample(fx, fy)
+          const v10 = sample(fx1, fy)
+          const v11 = sample(fx1, fy1)
+          const v01 = sample(fx, fy1)
 
-      ctx.fillStyle = `rgb(${rr}, ${gg}, ${bb})`
+          const vAvg = (v00 + v10 + v11 + v01) * 0.25
 
-      // 4 projected points
-      const p = (i, j, val) => {
-      const x = (j - cols / 2)
-      const y = (i - rows / 2)
-      const z = val
-        return {
-          x: cx + (x - y) * scaleX * 0.7,
-          y: cy + (x + y) * scaleY * 0.4 - z * heightScale
+          let t = (vAvg + absMax) / (2 * absMax)
+          const [r, g, b] = getColor(t)
+
+          const P00 = proj(fx, fy, v00)
+          const P10 = proj(fx1, fy, v10)
+          const P11 = proj(fx1, fy1, v11)
+          const P01 = proj(fx, fy1, v01)
+
+          ctx.fillStyle = `rgb(${r},${g},${b})`
+
+          ctx.beginPath()
+          ctx.moveTo(P00.x, P00.y)
+          ctx.lineTo(P10.x, P10.y)
+          ctx.lineTo(P11.x, P11.y)
+          ctx.lineTo(P01.x, P01.y)
+          ctx.closePath()
+          ctx.fillStyle = `rgb(${r},${g},${b})`
+
+          ctx.fill()
         }
       }
-
-      const P1 = p(i, j, v1)
-      const P2 = p(i, j + 1, v2)
-      const P3 = p(i + 1, j + 1, v3)
-      const P4 = p(i + 1, j, v4)
-
-      // 🔥 DRAW FILLED QUAD (SURFACE)
-      ctx.beginPath()
-      ctx.moveTo(P1.x, P1.y)
-      ctx.lineTo(P2.x, P2.y)
-      ctx.lineTo(P3.x, P3.y)
-      ctx.lineTo(P4.x, P4.y)
-      ctx.strokeStyle = 'rgba(255,255,255,0.03)'
-      ctx.stroke()
-      ctx.closePath()
-      ctx.fill()
     }
   }
 }
