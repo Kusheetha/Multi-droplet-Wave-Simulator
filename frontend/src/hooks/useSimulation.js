@@ -1,6 +1,6 @@
 import { useRef, useState, useCallback } from 'react'
 
-const WS_URL = 'ws://localhost:8000/ws/simulate'
+const WS_URL = 'wss://multi-droplet-wave-simulator.onrender.com/ws/simulate'
 
 export default function useSimulation() {
   const wsRef = useRef(null)
